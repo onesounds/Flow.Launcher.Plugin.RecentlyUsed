@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net7.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <BaseOutputPath>C:\DEV\Flow Launcher\Output\Release\Plugins\Flow.Launcher.Plugin.RecentlyUsed</BaseOutputPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <Reference Include="Flow.Launcher.Plugin">
+        <HintPath>..\..\..\Flow Launcher\Output\Release\Flow.Launcher.Plugin.dll</HintPath>
+      </Reference>
+    </ItemGroup>
+
+    <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+      <Exec Command="start &quot;&quot; &quot;C:\DEV\Flow Launcher\Output\Release\Flow.Launcher.exe&quot;" />
+    </Target>
+
+    <Target Name="PreBuild" BeforeTargets="PreBuildEvent">
+      <Exec Command="xcopy /Y &quot;$(TargetDir)*.*&quot; &quot;C:\Users\oneso\AppData\Roaming\FlowLauncher\Plugins\Flow.Launcher.Plugin.RecentlyUsed\&quot;" />
+    </Target>
+
+</Project>

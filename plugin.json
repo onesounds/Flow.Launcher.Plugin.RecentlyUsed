@@ -1,0 +1,10 @@
+{
+  "ID": "Flow.Launcher.Plugin.RecentlyUsed",
+  "Name": "Recently Used",
+  "Description": "Enhanced recent files search with lnk resolution and protocol icons.",
+  "Author": "ChatGPT + User",
+  "Version": "1.0.0",
+  "Language": "csharp",
+  "Website": "",
+  "ExecuteFileName": "Flow.Launcher.Plugin.RecentlyUsed.dll"
+}

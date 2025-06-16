@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "Flow.Launcher.Plugin.RecentlyUsed": {
+      "commandName": "Project"
+    },
+    "프로필 1": {
+      "commandName": "Executable",
+      "executablePath": "C:\\DEV\\Flow Launcher\\Output\\Release\\Flow.Launcher.exe"
+    }
+  }
+}
