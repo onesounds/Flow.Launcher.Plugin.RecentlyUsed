@@ -1,21 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>net7.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <BaseOutputPath>C:\DEV\Flow Launcher\Output\Release\Plugins\Flow.Launcher.Plugin.RecentlyUsed</BaseOutputPath>
-    </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net7.0-windows</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
 
-    <ItemGroup>
-      <Reference Include="Flow.Launcher.Plugin">
-        <HintPath>..\..\Flow Launcher\Output\Release\Flow.Launcher.Plugin.dll</HintPath>
-      </Reference>
-    </ItemGroup>
-
-
-    <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-      <Exec Command="start &quot;&quot; &quot;C:\DEV\Flow Launcher\Output\Release\Flow.Launcher.exe&quot;" />
-    </Target>
+	<ItemGroup>
+		<PackageReference Include="Flow.Launcher.Plugin" Version="4.6.0" />
+	</ItemGroup>
 
 </Project>
