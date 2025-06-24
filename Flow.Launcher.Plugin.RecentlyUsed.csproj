@@ -3,11 +3,13 @@
 	<PropertyGroup>
 		<TargetFramework>net7.0-windows</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
+		<UseWPF>true</UseWPF>
 		<Nullable>enable</Nullable>
+		<OutputPath>bin\Debug\net7.0-windows\</OutputPath>
+		<BaseOutputPath>bin\</BaseOutputPath>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<PackageReference Include="Flow.Launcher.Plugin" Version="4.6.0" />
 	</ItemGroup>
-
 </Project>

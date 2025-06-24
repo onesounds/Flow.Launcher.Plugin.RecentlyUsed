@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36203.30 d17.14
+VisualStudioVersion = 17.14.36203.30
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "솔루션 항목", "솔루션 항목", "{2A3A057F-5D22-31FD-628C-DF5EF75AEF1E}"
 EndProject
@@ -23,5 +23,8 @@ Global
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{3B6B1F32-F1AC-4BBD-C1E6-AA6385DE6446} = {2A3A057F-5D22-31FD-628C-DF5EF75AEF1E}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C8CFAA0F-37C7-4552-9A60-99578AD46A4E}
 	EndGlobalSection
 EndGlobal

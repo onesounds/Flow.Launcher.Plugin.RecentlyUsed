@@ -5,3 +5,5 @@ obj/
 *.user
 *.DotSettings.user
 .vs/
+/Flow.Launcher.Plugin.RecentlyUsed.csproj.Backup.tmp
+/Resource

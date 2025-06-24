@@ -1,91 +1,185 @@
 using Flow.Launcher.Plugin;
+using Flow.Launcher.Plugin.RecentlyUsed;
 using Flow.Launcher.Plugin.RecentlyUsed.Helper;
-using System;
-using System.Collections.Generic;
+using Flow.Launcher.Plugin.RecentlyUsed.Views;
+using System.Windows.Controls;
 using System.IO;
-using System.Linq;
 
-namespace Flow.Launcher.Plugin.RecentlyUsed
+public class Main : IPlugin, ISettingProvider
 {
-    public class Main : IPlugin
+    private PluginInitContext context;
+    private string recentFolder;
+    private Settings settings;
+
+    public void Init(PluginInitContext context)
     {
-        private PluginInitContext context;
-        private string recentFolder;
+        this.context = context;
+        recentFolder = Environment.GetFolderPath(Environment.SpecialFolder.Recent);
+        settings = context.API.LoadSettingJsonStorage<Settings>();
+    }
 
-        public void Init(PluginInitContext context)
+    public Control CreateSettingPanel()
+    {
+        return new SettingsUserControl(settings);
+    }
+
+    public List<Result> Query(Query query)
+    {
+        var results = new List<Result>();
+
+        if (!Directory.Exists(recentFolder))
+            return results;
+
+        var searchTerm = query.Search?.Trim() ?? "";
+
+        var files = Directory.GetFiles(recentFolder, "*.lnk")
+            .Select(f => new FileInfo(f))
+            .OrderByDescending(f => f.LastWriteTime)
+            .ToList();
+
+        foreach (var fileInfo in files)
         {
-            this.context = context;
-            recentFolder = Environment.GetFolderPath(Environment.SpecialFolder.Recent);
-        }
+            var lnkPath = fileInfo.FullName;
+            var fileName = Path.GetFileNameWithoutExtension(lnkPath);
 
-        public List<Result> Query(Query query)
-        {
-            var results = new List<Result>();
+            string targetPath = ShellLinkHelper.ResolveShortcut(lnkPath);
 
-            if (!Directory.Exists(recentFolder))
-                return results;
+            if (string.IsNullOrEmpty(targetPath))
+                continue;
 
-            var searchTerm = query.Search?.Trim() ?? "";
+            bool isFolder = Directory.Exists(targetPath);
+            if (!settings.ShowFolders && isFolder)
+                continue;
 
-            var files = Directory.GetFiles(recentFolder, "*.lnk")
-                .Select(f => new FileInfo(f))
-                .OrderByDescending(f => f.LastWriteTime)
-                .ToList();
+            if (!File.Exists(targetPath) && !isFolder)
+                continue;
 
-            foreach (var fileInfo in files)
+            // 대상 파일의 전체 이름 (확장자 포함)
+            string targetFileName = Path.GetFileName(targetPath);
+            
+            // 검색어가 있을 경우 파일명과 확장자를 모두 검색
+            if (!string.IsNullOrEmpty(searchTerm) &&
+                !fileName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) &&
+                !targetFileName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // 드라이브 루트 처리
+            string title = Path.GetFileName(targetPath);
+            string subTitle = Path.GetDirectoryName(targetPath);
+            bool isDriveRoot = false;
+
+            if (string.IsNullOrEmpty(title) && Directory.Exists(targetPath))
             {
-                var lnkPath = fileInfo.FullName;
-                var fileName = Path.GetFileNameWithoutExtension(lnkPath);
-
-                // 검색어 필터링 (기본은 링크 파일명 기반)
-                if (!string.IsNullOrEmpty(searchTerm) &&
-                    !fileName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                string targetPath = ShellLinkHelper.ResolveShortcut(lnkPath);
-
-                // 타겟이 없는 경우 fallback
-                if (string.IsNullOrEmpty(targetPath))
-                    targetPath = fileName;
-
-                string title = Path.GetFileName(targetPath);
-                string subtitle = Path.GetDirectoryName(targetPath);
-                string icoPath = lnkPath;
-
-                // 프로토콜 아이콘 (특히 OneNote 등)
-                if (fileName.Contains("--"))
+                try
                 {
-                    var protocol = fileName.Split("--")[0].Replace('-', ':');
-                    var protocolIcon = ProtocolIconHelper.GetProtocolIconPath(protocol);
-                    if (!string.IsNullOrEmpty(protocolIcon))
-                        icoPath = protocolIcon;
-                }
-
-                results.Add(new Result
-                {
-                    Title = title,
-                    SubTitle = subtitle,
-                    IcoPath = icoPath,
-                    Action = c =>
+                    // 드라이브 루트 확인
+                    isDriveRoot = Path.GetPathRoot(targetPath) == targetPath;
+                    
+                    if (isDriveRoot)
                     {
-                        try
-                        {
-                            // 폴더 자동 rewrite 적용
-                            if (Directory.Exists(targetPath) && title.Equals(searchTerm, StringComparison.OrdinalIgnoreCase))
-                            {
-                                context.API.ChangeQuery(targetPath + "\\", true);
-                                return false;
-                            }
+                        var driveInfo = new DriveInfo(targetPath);
+                        string driveRoot = driveInfo.Name; // C:\
+                        string driveLetter = driveRoot.TrimEnd('\\'); // C:
+                        string label = driveInfo.VolumeLabel; 
 
-                            context.API.ShellRun(lnkPath);
-                        }
-                        catch { }
-                        return true;
+                        title = $"{label} ({driveLetter})";
+                        subTitle = driveInfo.Name; // C:\
                     }
-                });
+                }
+                catch
+                {
+                    title = targetPath;
+                    subTitle = targetPath;
+                }
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(title))
+                    title = targetPath;
+                if (string.IsNullOrEmpty(subTitle))
+                    subTitle = targetPath;
             }
 
-            return results;
+            results.Add(new Result
+            {
+                Title = title,
+                SubTitle = subTitle,
+                IcoPath = lnkPath,
+                Action = _ =>
+                {
+                    try
+                    {
+                        // 드라이브 루트 또는 폴더인 경우
+                        if (isDriveRoot || isFolder)
+                        {
+                            // 디렉토리 열기
+                            context.API.OpenDirectory(targetPath);
+                            return true;
+                        }
+                        else
+                        {
+                            
+                            context.API.ShellRun(targetPath);
+                            return true;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        
+                        if (isDriveRoot || isFolder)
+                        {
+                            
+                            var psi = new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = "explorer.exe",
+                                Arguments = targetPath,
+                                UseShellExecute = true
+                            };
+                            System.Diagnostics.Process.Start(psi);
+                        }
+                        else
+                        {
+                            try
+                            {
+                                
+                                var psi = new System.Diagnostics.ProcessStartInfo
+                                {
+                                    FileName = targetPath,
+                                    UseShellExecute = true
+                                };
+                                System.Diagnostics.Process.Start(psi);
+                                return true;
+                            }
+                            catch (Exception pathEx)
+                            {
+                                try
+                                {
+                                    
+                                    var psi = new System.Diagnostics.ProcessStartInfo
+                                    {
+                                        FileName = "cmd.exe",
+                                        Arguments = $"/c start \"\" \"{targetPath}\"",
+                                        CreateNoWindow = true,
+                                        UseShellExecute = false
+                                    };
+                                    System.Diagnostics.Process.Start(psi);
+                                    return true;
+                                }
+                                catch (Exception cmdEx)
+                                {
+                                    
+                                    context.API.ShellRun(targetPath);
+                                    return true;
+                                }
+                            }
+                        }
+                        return true;
+                    }
+                },
+                AddSelectedCount = false
+            });
         }
+
+        return results;
     }
 }
