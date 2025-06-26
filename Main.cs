@@ -5,6 +5,10 @@ using Flow.Launcher.Plugin.RecentlyUsed.Views;
 using System.Windows.Controls;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Data.OleDb;
+using System;
+using System.Linq;
+using System.Collections.Generic;
 
 public class Main : IPlugin, ISettingProvider
 {
@@ -32,43 +36,40 @@ public class Main : IPlugin, ISettingProvider
             return results;
 
         var searchTerm = query.Search?.Trim() ?? "";
-
-        var files = Directory.GetFiles(recentFolder, "*.lnk")
-            .Select(f => new FileInfo(f))
-            .OrderByDescending(f => f.LastWriteTime)
-            .ToList();
+        var files = GetRecentLnkFiles(recentFolder);
 
         foreach (var fileInfo in files)
         {
             var lnkPath = fileInfo.FullName;
             var fileName = Path.GetFileNameWithoutExtension(lnkPath);
-
             string targetPath = ShellLinkHelper.ResolveShortcut(lnkPath);
 
             if (string.IsNullOrEmpty(targetPath))
                 continue;
 
-            // 로깅(디버깅용, 나중에 제거 가능)
-            // context.API.LogInfo($"File: {fileName}, Target: {targetPath}");
+            // 대상 경로가 절대경로가 아닌 경우 절대 경로로 변환
+            if (!Path.IsPathRooted(targetPath))
+            {
+                try
+                {
+                    targetPath = Path.GetFullPath(targetPath);
+                }
+                catch { }
+            }
 
             bool isFolder = Directory.Exists(targetPath);
             bool isFile = File.Exists(targetPath);
             bool isUrl = Uri.IsWellFormedUriString(targetPath, UriKind.Absolute) ||
-             targetPath.StartsWith("onenote:", StringComparison.OrdinalIgnoreCase) ||
-             targetPath.StartsWith("onenotehttps:", StringComparison.OrdinalIgnoreCase);
+                         targetPath.StartsWith("onenote:", StringComparison.OrdinalIgnoreCase) ||
+                         targetPath.StartsWith("onenotehttps:", StringComparison.OrdinalIgnoreCase);
 
-            // URL은 항상 표시되도록 조건 수정
             if (!settings.ShowFolders && isFolder)
                 continue;
 
-            // 파일도 아니고 폴더도 아니고 URL도 아니면 건너뛰기
             if (!isFile && !isFolder && !isUrl)
                 continue;
 
-            // 대상 파일의 전체 이름 (확장자 포함)
             string targetFileName = Path.GetFileName(targetPath);
-            
-            // 드라이브 루트 처리
             string title = Path.GetFileName(targetPath);
             string subTitle = Path.GetDirectoryName(targetPath);
             bool isDriveRoot = false;
@@ -77,15 +78,10 @@ public class Main : IPlugin, ISettingProvider
             {
                 try
                 {
-                    // 드라이브 루트 확인
                     isDriveRoot = Path.GetPathRoot(targetPath) == targetPath;
-
                     if (isDriveRoot)
                     {
-                        // 드라이브 루트면 lnk 파일명(확장자 제외)을 사용
-                        title = fileName;  // fileName은 이미 상단에서 Path.GetFileNameWithoutExtension(lnkPath)로 확장자 제외됨
-                        
-                        // 파일명 끝에 드라이브 문자만 있는 경우(예: "로컬 디스크 (C)")라면 콜론(:) 추가
+                        title = fileName;
                         if (title.EndsWith(")"))
                         {
                             int openParenIndex = title.LastIndexOf('(');
@@ -94,13 +90,11 @@ public class Main : IPlugin, ISettingProvider
                                 char driveLetter = title[openParenIndex + 1];
                                 if (char.IsLetter(driveLetter) && title[openParenIndex + 2] == ')')
                                 {
-                                    // "로컬 디스크 (C)" -> "로컬 디스크 (C:)"로 변환
                                     title = title.Insert(openParenIndex + 2, ":");
                                 }
                             }
                         }
-                        
-                        subTitle = targetPath;  // 경로 정보는 subTitle에 표시
+                        subTitle = targetPath;
                     }
                 }
                 catch
@@ -117,7 +111,6 @@ public class Main : IPlugin, ISettingProvider
                     subTitle = targetPath;
             }
 
-            // 검색어가 있을 경우 파일명과 확장자를 모두 검색 (title과 subtitle도 검색 대상에 포함)
             if (!string.IsNullOrEmpty(searchTerm) &&
                 !fileName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) &&
                 !targetFileName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) &&
@@ -126,42 +119,72 @@ public class Main : IPlugin, ISettingProvider
                 !targetPath.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
                 continue;
 
+            string newQuery = targetPath;
+            if (Directory.Exists(targetPath) && !newQuery.EndsWith(Path.DirectorySeparatorChar.ToString()))
+            {
+                newQuery += Path.DirectorySeparatorChar;
+            }
+
             results.Add(new Result
             {
                 Title = title,
                 SubTitle = subTitle,
                 IcoPath = lnkPath,
+                AutoCompleteText = newQuery,
                 Action = _ =>
                 {
-                    // 드라이브 루트 또는 폴더인 경우
-                    if (isDriveRoot || isFolder)
+                    try
                     {
-                        context.API.OpenDirectory(targetPath);
-                        return true;
+                        // 선택한 항목(lnk 파일)을 바로 실행합니다.
+                        context.API.ShellRun(lnkPath);
                     }
-                    else
-                    {
-                        // lnk가 가리키는 대상이 이미 따옴표로 감싸져 있다면 따옴표 제거
-                        string normalizedTarget = targetPath;
-                        if (normalizedTarget.StartsWith("\"") && normalizedTarget.EndsWith("\""))
-                            normalizedTarget = normalizedTarget.Substring(1, normalizedTarget.Length - 2);
-
-                        // explorer.exe로 항상 열기 (띄어쓰기/한글/따옴표 모두 안전)
-                        var psi = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = "explorer.exe",
-                            Arguments = $"\"{normalizedTarget}\"",
-                            UseShellExecute = true
-                        };
-                        System.Diagnostics.Process.Start(psi);
-                        return true;
-                    }
-                },
-                AddSelectedCount = false
+                    catch { }
+                    return true; // 실행 후 Flow Launcher 창을 닫습니다.
+                }
             });
         }
 
         return results;
+    }
+
+    private List<FileInfo> GetRecentLnkFiles(string recentFolder)
+    {
+        var fileList = new List<FileInfo>();
+        try
+        {
+            using (var connection = new OleDbConnection("Provider=Search.CollatorDSO;Extended Properties='Application=Windows';"))
+            {
+                connection.Open();
+                string escapedFolder = recentFolder.Replace("\\", "\\\\");
+                string queryStr = $"SELECT System.ItemPathDisplay, System.DateModified FROM SYSTEMINDEX " +
+                                  $"WHERE scope = 'file:{escapedFolder}' AND System.FileName LIKE '%.lnk' " +
+                                  $"ORDER BY System.DateModified DESC";
+
+                using (var command = new OleDbCommand(queryStr, connection))
+                {
+                    using (var reader = command.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            string filePath = reader["System.ItemPathDisplay"] as string;
+                            if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+                            {
+                                fileList.Add(new FileInfo(filePath));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // 인덱서 조회 실패 시 기존 방식으로 대체
+            fileList = Directory.GetFiles(recentFolder, "*.lnk")
+                               .Select(f => new FileInfo(f))
+                               .OrderByDescending(f => f.LastWriteTime)
+                               .ToList();
+        }
+        return fileList;
     }
 
     private static string GetVolumeLabel(string driveRoot)
@@ -185,7 +208,6 @@ public class Main : IPlugin, ISettingProvider
         uint nFileSystemNameSize);
 }
 
-// 캐시 항목을 위한 클래스
 [Serializable]
 public class RecentItem
 {
