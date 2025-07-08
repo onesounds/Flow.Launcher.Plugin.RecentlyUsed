@@ -2,8 +2,12 @@
     x:Class="Flow.Launcher.Plugin.RecentlyUsed.Views.SettingsUserControl"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Height="50">
-    <StackPanel Margin="10">
-        <CheckBox Content="Show Folder" IsChecked="{Binding ShowFolders, Mode=TwoWay}" />
+    Height="90">
+    <StackPanel Margin="70,10,10,10">
+        <CheckBox
+            Margin="0,0,0,5"
+            Content="Show Folder"
+            IsChecked="{Binding ShowFolders, Mode=TwoWay}" />
+        <CheckBox Content="Show Accessed Date" IsChecked="{Binding ShowAccessedDate, Mode=TwoWay}" />
     </StackPanel>
 </UserControl>

@@ -1,0 +1,12 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:system="clr-namespace:System;assembly=mscorlib">
+
+    <system:String x:Key="flow_plugin_recentlyused_plugin_name">Recently Used</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_plugin_description">Search for recently used files and folders.</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_just_now">Just now</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_hour_ago">hour ago</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_hours_ago">hours ago</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_yesterday">Yesterday</system:String>
+
+</ResourceDictionary>

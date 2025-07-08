@@ -14,4 +14,10 @@
 		<PackageReference Include="Flow.Launcher.Plugin" Version="4.6.0" />
 		<PackageReference Include="System.Data.OleDb" Version="9.0.6" />
 	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="Languages\**">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
 </Project>

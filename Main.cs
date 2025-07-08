@@ -9,8 +9,10 @@ using System.Data.OleDb;
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Globalization;
 
-public class Main : IPlugin, ISettingProvider
+// IPluginI18n 인터페이스를 구현합니다.
+public class Main : IPlugin, ISettingProvider, IPluginI18n
 {
     private PluginInitContext context;
     private string recentFolder;
@@ -26,6 +28,26 @@ public class Main : IPlugin, ISettingProvider
     public Control CreateSettingPanel()
     {
         return new SettingsUserControl(settings);
+    }
+
+    // IPluginI18n 인터페이스의 멤버를 구현합니다.
+    public string GetTranslatedPluginTitle()
+    {
+        return T("flow_plugin_recentlyused_plugin_name");
+    }
+
+    public string GetTranslatedPluginDescription()
+    {
+        return T("flow_plugin_recentlyused_plugin_description");
+    }
+
+    // Flow Launcher의 언어가 변경될 때 호출되는 메서드를 추가합니다.
+    public void OnCultureInfoChanged(CultureInfo newCulture)
+    {
+        // Flow Launcher가 알려준 문화권 정보로 현재 스레드의 문화권을 명시적으로 설정합니다.
+        // 이것이 Flow Launcher의 언어 설정을 올바르게 따르는 방법입니다.
+        CultureInfo.CurrentCulture = newCulture;
+        CultureInfo.CurrentUICulture = newCulture;
     }
 
     public List<Result> Query(Query query)
@@ -125,18 +147,26 @@ public class Main : IPlugin, ISettingProvider
                 newQuery += Path.DirectorySeparatorChar;
             }
 
+            // 설정에 따라 부제(SubTitle)를 조합합니다.
+            string displaySubTitle = subTitle;
+            if (settings.ShowAccessedDate)
+            {
+                string formattedDate = FormatDateTime(fileInfo.LastWriteTime);
+                displaySubTitle = $"{formattedDate} | {subTitle}";
+            }
+
             results.Add(new Result
             {
                 Title = title,
-                SubTitle = subTitle,
+                SubTitle = displaySubTitle,
                 IcoPath = lnkPath,
                 AutoCompleteText = newQuery,
                 Action = _ =>
                 {
                     try
                     {
-                        // 선택한 항목(lnk 파일)을 바로 실행합니다.
-                        context.API.ShellRun(lnkPath);
+                        // 경로에 공백이 포함된 경우를 처리하기 위해 따옴표로 감싸줍니다.
+                        context.API.ShellRun($"\"{lnkPath}\"");
                     }
                     catch { }
                     return true; // 실행 후 Flow Launcher 창을 닫습니다.
@@ -145,6 +175,33 @@ public class Main : IPlugin, ISettingProvider
         }
 
         return results;
+    }
+
+    private string FormatDateTime(DateTime dateTime)
+    {
+        var now = DateTime.Now;
+        var diff = now - dateTime;
+        // Flow Launcher의 언어 설정을 따르기 위해 현재 UI 문화권을 사용합니다.
+        var culture = CultureInfo.CurrentUICulture;
+
+        if (diff.TotalHours < 1)
+            return T("flow_plugin_recentlyused_just_now");
+        if (diff.TotalHours < 2)
+            return $"1 {T("flow_plugin_recentlyused_hour_ago")}";
+        if (now.Date == dateTime.Date)
+            return $"{(int)diff.TotalHours} {T("flow_plugin_recentlyused_hours_ago")}";
+        if (now.Date.AddDays(-1) == dateTime.Date)
+            return $"{T("flow_plugin_recentlyused_yesterday")} {dateTime:HH:mm}";
+        
+        if (diff.TotalDays < 7)
+            return $"{culture.DateTimeFormat.GetDayName(dateTime.DayOfWeek)} {dateTime:HH:mm}";
+        
+        return dateTime.ToString("M", culture); // 예: "4월 2일" 또는 "April 2"
+    }
+
+    private string T(string key)
+    {
+        return context.API.GetTranslation(key);
     }
 
     private List<FileInfo> GetRecentLnkFiles(string recentFolder)
@@ -219,4 +276,5 @@ public class RecentItem
     public string SubTitle { get; set; }
     public bool IsFolder { get; set; }
     public bool IsDriveRoot { get; set; }
+    public DateTime DateModified { get; set; }
 }
