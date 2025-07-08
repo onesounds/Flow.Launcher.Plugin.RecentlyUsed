@@ -10,19 +10,56 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
-// IPluginI18n 인터페이스를 구현합니다.
-public class Main : IPlugin, ISettingProvider, IPluginI18n
+// IPluginI18n 및 IDisposable 인터페이스를 구현합니다.
+public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
 {
     private PluginInitContext context;
     private string recentFolder;
     private Settings settings;
+
+    private List<RecentItem> _cachedRecentItems = new List<RecentItem>();
+    private string _cacheFilePath;
+    private bool _isCacheUpdating = false;
+    private FileSystemWatcher _watcher;
+    private readonly Timer _updateTimer;
+
+    public Main()
+    {
+        // 짧은 시간 내의 여러 변경 이벤트를 하나로 묶어 처리하기 위한 타이머 (500ms 지연)
+        _updateTimer = new Timer(_ => UpdateCache(), null, Timeout.Infinite, Timeout.Infinite);
+    }
 
     public void Init(PluginInitContext context)
     {
         this.context = context;
         recentFolder = Environment.GetFolderPath(Environment.SpecialFolder.Recent);
         settings = context.API.LoadSettingJsonStorage<Settings>();
+        _cacheFilePath = Path.Combine(context.CurrentPluginMetadata.PluginDirectory, "cache.json");
+
+        LoadCacheFromFile();
+
+        if (Directory.Exists(recentFolder))
+        {
+            _watcher = new FileSystemWatcher
+            {
+                Path = recentFolder,
+                Filter = "*.lnk",
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime,
+                EnableRaisingEvents = true
+            };
+
+            _watcher.Changed += OnRecentFolderChanged;
+            _watcher.Created += OnRecentFolderChanged;
+            _watcher.Deleted += OnRecentFolderChanged;
+            _watcher.Renamed += OnRecentFolderChanged;
+        }
+
+        // 초기 캐시 업데이트 (백그라운드 실행)
+        Task.Run(UpdateCache);
     }
 
     public Control CreateSettingPanel()
@@ -30,7 +67,6 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n
         return new SettingsUserControl(settings);
     }
 
-    // IPluginI18n 인터페이스의 멤버를 구현합니다.
     public string GetTranslatedPluginTitle()
     {
         return T("flow_plugin_recentlyused_plugin_name");
@@ -41,162 +77,197 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n
         return T("flow_plugin_recentlyused_plugin_description");
     }
 
-    // Flow Launcher의 언어가 변경될 때 호출되는 메서드를 추가합니다.
     public void OnCultureInfoChanged(CultureInfo newCulture)
     {
-        // Flow Launcher가 알려준 문화권 정보로 현재 스레드의 문화권을 명시적으로 설정합니다.
-        // 이것이 Flow Launcher의 언어 설정을 올바르게 따르는 방법입니다.
         CultureInfo.CurrentCulture = newCulture;
         CultureInfo.CurrentUICulture = newCulture;
     }
 
     public List<Result> Query(Query query)
     {
-        var results = new List<Result>();
-
-        if (!Directory.Exists(recentFolder))
-            return results;
-
         var searchTerm = query.Search?.Trim() ?? "";
-        var files = GetRecentLnkFiles(recentFolder);
 
-        foreach (var fileInfo in files)
+        // 캐시된 데이터를 기반으로 검색
+        var filteredItems = string.IsNullOrEmpty(searchTerm)
+            ? _cachedRecentItems
+            : _cachedRecentItems.AsParallel()
+                .Where(item =>
+                    (item.FileName?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (item.TargetFileName?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (item.Title?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (item.SubTitle?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (item.TargetPath?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false)
+                ).ToList();
+
+        var results = new List<Result>();
+        foreach (var item in filteredItems)
         {
-            var lnkPath = fileInfo.FullName;
-            var fileName = Path.GetFileNameWithoutExtension(lnkPath);
-            string targetPath = ShellLinkHelper.ResolveShortcut(lnkPath);
-
-            if (string.IsNullOrEmpty(targetPath))
-                continue;
-
-            // 대상 경로가 절대경로가 아닌 경우 절대 경로로 변환
-            if (!Path.IsPathRooted(targetPath))
-            {
-                try
-                {
-                    targetPath = Path.GetFullPath(targetPath);
-                }
-                catch { }
-            }
-
-            bool isFolder = Directory.Exists(targetPath);
-            bool isFile = File.Exists(targetPath);
-            bool isUrl = Uri.IsWellFormedUriString(targetPath, UriKind.Absolute) ||
-                         targetPath.StartsWith("onenote:", StringComparison.OrdinalIgnoreCase) ||
-                         targetPath.StartsWith("onenotehttps:", StringComparison.OrdinalIgnoreCase);
-
-            if (!settings.ShowFolders && isFolder)
-                continue;
-
-            if (!isFile && !isFolder && !isUrl)
-                continue;
-
-            string targetFileName = Path.GetFileName(targetPath);
-            string title = Path.GetFileName(targetPath);
-            string subTitle = Path.GetDirectoryName(targetPath);
-            bool isDriveRoot = false;
-
-            if (string.IsNullOrEmpty(title) && Directory.Exists(targetPath))
-            {
-                try
-                {
-                    isDriveRoot = Path.GetPathRoot(targetPath) == targetPath;
-                    if (isDriveRoot)
-                    {
-                        title = fileName;
-                        if (title.EndsWith(")"))
-                        {
-                            int openParenIndex = title.LastIndexOf('(');
-                            if (openParenIndex > 0 && openParenIndex + 2 < title.Length)
-                            {
-                                char driveLetter = title[openParenIndex + 1];
-                                if (char.IsLetter(driveLetter) && title[openParenIndex + 2] == ')')
-                                {
-                                    title = title.Insert(openParenIndex + 2, ":");
-                                }
-                            }
-                        }
-                        subTitle = targetPath;
-                    }
-                }
-                catch
-                {
-                    title = targetPath;
-                    subTitle = targetPath;
-                }
-            }
-            else
-            {
-                if (string.IsNullOrEmpty(title))
-                    title = targetPath;
-                if (string.IsNullOrEmpty(subTitle))
-                    subTitle = targetPath;
-            }
-
-            if (!string.IsNullOrEmpty(searchTerm) &&
-                !fileName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) &&
-                !targetFileName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) &&
-                !title.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) &&
-                !subTitle.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) &&
-                !targetPath.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            string newQuery = targetPath;
-            if (Directory.Exists(targetPath) && !newQuery.EndsWith(Path.DirectorySeparatorChar.ToString()))
-            {
-                newQuery += Path.DirectorySeparatorChar;
-            }
-
-            // 설정에 따라 부제(SubTitle)를 조합합니다.
-            string displaySubTitle = subTitle;
+            string displaySubTitle = item.SubTitle;
             if (settings.ShowAccessedDate)
             {
-                string formattedDate = FormatDateTime(fileInfo.LastWriteTime);
-                displaySubTitle = $"{formattedDate} | {subTitle}";
+                string formattedDate = FormatDateTime(item.DateModified);
+                displaySubTitle = $"{formattedDate} | {item.SubTitle}";
             }
 
             results.Add(new Result
             {
-                Title = title,
+                Title = item.Title,
                 SubTitle = displaySubTitle,
-                IcoPath = lnkPath,
-                AutoCompleteText = newQuery,
+                IcoPath = item.LnkPath,
+                AutoCompleteText = item.TargetPath,
                 Action = _ =>
                 {
                     try
                     {
-                        // 경로에 공백이 포함된 경우를 처리하기 위해 따옴표로 감싸줍니다.
-                        context.API.ShellRun($"\"{lnkPath}\"");
+                        context.API.ShellRun($"\"{item.LnkPath}\"");
                     }
                     catch { }
-                    return true; // 실행 후 Flow Launcher 창을 닫습니다.
+                    return true;
                 }
             });
         }
-
         return results;
+    }
+
+    private void OnRecentFolderChanged(object sender, FileSystemEventArgs e)
+    {
+        // 변경 이벤트 발생 시, 500ms 후에 캐시 업데이트를 예약합니다.
+        _updateTimer.Change(500, Timeout.Infinite);
+    }
+
+    private void UpdateCache()
+    {
+        if (_isCacheUpdating) return;
+        _isCacheUpdating = true;
+
+        try
+        {
+            var newCache = new List<RecentItem>();
+            if (Directory.Exists(recentFolder))
+            {
+                var files = GetRecentLnkFiles(recentFolder);
+                foreach (var fileInfo in files)
+                {
+                    var lnkPath = fileInfo.FullName;
+                    var fileName = Path.GetFileNameWithoutExtension(lnkPath);
+                    string targetPath = ShellLinkHelper.ResolveShortcut(lnkPath);
+
+                    if (string.IsNullOrEmpty(targetPath)) continue;
+                    if (!Path.IsPathRooted(targetPath)) { try { targetPath = Path.GetFullPath(targetPath); } catch { } }
+
+                    bool isFolder = Directory.Exists(targetPath);
+                    bool isFile = File.Exists(targetPath);
+                    bool isUrl = Uri.IsWellFormedUriString(targetPath, UriKind.Absolute) || targetPath.StartsWith("onenote:", StringComparison.OrdinalIgnoreCase);
+
+                    if (!settings.ShowFolders && isFolder) continue;
+                    if (!isFile && !isFolder && !isUrl) continue;
+
+                    string targetFileName = Path.GetFileName(targetPath);
+                    string title = Path.GetFileName(targetPath);
+                    string subTitle = Path.GetDirectoryName(targetPath);
+                    bool isDriveRoot = false;
+
+                    if (string.IsNullOrEmpty(title) && Directory.Exists(targetPath))
+                    {
+                        try
+                        {
+                            isDriveRoot = Path.GetPathRoot(targetPath) == targetPath;
+                            if (isDriveRoot)
+                            {
+                                title = fileName;
+                                if (title.EndsWith(")"))
+                                {
+                                    int openParenIndex = title.LastIndexOf('(');
+                                    if (openParenIndex > 0 && openParenIndex + 2 < title.Length)
+                                    {
+                                        char driveLetter = title[openParenIndex + 1];
+                                        if (char.IsLetter(driveLetter) && title[openParenIndex + 2] == ')')
+                                        {
+                                            title = title.Insert(openParenIndex + 2, ":");
+                                        }
+                                    }
+                                }
+                                subTitle = targetPath;
+                            }
+                        }
+                        catch { title = targetPath; subTitle = targetPath; }
+                    }
+                    else
+                    {
+                        if (string.IsNullOrEmpty(title)) title = targetPath;
+                        if (string.IsNullOrEmpty(subTitle)) subTitle = targetPath;
+                    }
+
+                    newCache.Add(new RecentItem
+                    {
+                        LnkPath = lnkPath,
+                        FileName = fileName,
+                        TargetPath = targetPath,
+                        TargetFileName = targetFileName,
+                        Title = title,
+                        SubTitle = subTitle,
+                        IsFolder = isFolder,
+                        IsDriveRoot = isDriveRoot,
+                        DateModified = fileInfo.LastWriteTime
+                    });
+                }
+            }
+            _cachedRecentItems = newCache;
+            SaveCacheToFile();
+        }
+        finally
+        {
+            _isCacheUpdating = false;
+        }
+    }
+
+    private void SaveCacheToFile()
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(_cachedRecentItems);
+            File.WriteAllText(_cacheFilePath, json);
+        }
+        catch (Exception ex)
+        {
+            context.API.LogException(nameof(Main), "Failed to save cache.", ex);
+        }
+    }
+
+    private void LoadCacheFromFile()
+    {
+        try
+        {
+            if (File.Exists(_cacheFilePath))
+            {
+                var json = File.ReadAllText(_cacheFilePath);
+                var items = JsonSerializer.Deserialize<List<RecentItem>>(json);
+                if (items != null)
+                {
+                    _cachedRecentItems = items;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            context.API.LogException(nameof(Main), "Failed to load cache.", ex);
+            _cachedRecentItems = new List<RecentItem>();
+        }
     }
 
     private string FormatDateTime(DateTime dateTime)
     {
         var now = DateTime.Now;
         var diff = now - dateTime;
-        // Flow Launcher의 언어 설정을 따르기 위해 현재 UI 문화권을 사용합니다.
         var culture = CultureInfo.CurrentUICulture;
 
-        if (diff.TotalHours < 1)
-            return T("flow_plugin_recentlyused_just_now");
-        if (diff.TotalHours < 2)
-            return $"1 {T("flow_plugin_recentlyused_hour_ago")}";
-        if (now.Date == dateTime.Date)
-            return $"{(int)diff.TotalHours} {T("flow_plugin_recentlyused_hours_ago")}";
-        if (now.Date.AddDays(-1) == dateTime.Date)
-            return $"{T("flow_plugin_recentlyused_yesterday")} {dateTime:HH:mm}";
+        if (diff.TotalHours < 1) return T("flow_plugin_recentlyused_just_now");
+        if (diff.TotalHours < 2) return $"1 {T("flow_plugin_recentlyused_hour_ago")}";
+        if (now.Date == dateTime.Date) return $"{(int)diff.TotalHours} {T("flow_plugin_recentlyused_hours_ago")}";
+        if (now.Date.AddDays(-1) == dateTime.Date) return $"{T("flow_plugin_recentlyused_yesterday")} {dateTime:HH:mm}";
+        if (diff.TotalDays < 7) return $"{culture.DateTimeFormat.GetDayName(dateTime.DayOfWeek)} {dateTime:HH:mm}";
         
-        if (diff.TotalDays < 7)
-            return $"{culture.DateTimeFormat.GetDayName(dateTime.DayOfWeek)} {dateTime:HH:mm}";
-        
-        return dateTime.ToString("M", culture); // 예: "4월 2일" 또는 "April 2"
+        return dateTime.ToString("M", culture);
     }
 
     private string T(string key)
@@ -235,13 +306,18 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n
         }
         catch (Exception ex)
         {
-            // 인덱서 조회 실패 시 기존 방식으로 대체
             fileList = Directory.GetFiles(recentFolder, "*.lnk")
                                .Select(f => new FileInfo(f))
                                .OrderByDescending(f => f.LastWriteTime)
                                .ToList();
         }
         return fileList;
+    }
+
+    public void Dispose()
+    {
+        _watcher?.Dispose();
+        _updateTimer?.Dispose();
     }
 
     private static string GetVolumeLabel(string driveRoot)
