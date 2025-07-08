@@ -5,7 +5,6 @@ using Flow.Launcher.Plugin.RecentlyUsed.Views;
 using System.Windows.Controls;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Data.OleDb;
 using System;
 using System.Linq;
 using System.Collections.Generic;
@@ -115,6 +114,7 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
                 SubTitle = displaySubTitle,
                 IcoPath = item.LnkPath,
                 AutoCompleteText = item.TargetPath,
+                AddSelectedCount = false,
                 Action = _ =>
                 {
                     try
@@ -215,6 +215,10 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
             _cachedRecentItems = newCache;
             SaveCacheToFile();
         }
+        catch (Exception ex)
+        {
+            context.API.LogException(nameof(Main), "Failed to update cache.", ex);
+        }
         finally
         {
             _isCacheUpdating = false;
@@ -277,41 +281,18 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
 
     private List<FileInfo> GetRecentLnkFiles(string recentFolder)
     {
-        var fileList = new List<FileInfo>();
         try
         {
-            using (var connection = new OleDbConnection("Provider=Search.CollatorDSO;Extended Properties='Application=Windows';"))
-            {
-                connection.Open();
-                string escapedFolder = recentFolder.Replace("\\", "\\\\");
-                string queryStr = $"SELECT System.ItemPathDisplay, System.DateModified FROM SYSTEMINDEX " +
-                                  $"WHERE scope = 'file:{escapedFolder}' AND System.FileName LIKE '%.lnk' " +
-                                  $"ORDER BY System.DateModified DESC";
-
-                using (var command = new OleDbCommand(queryStr, connection))
-                {
-                    using (var reader = command.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            string filePath = reader["System.ItemPathDisplay"] as string;
-                            if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
-                            {
-                                fileList.Add(new FileInfo(filePath));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            fileList = Directory.GetFiles(recentFolder, "*.lnk")
+            return Directory.GetFiles(recentFolder, "*.lnk")
                                .Select(f => new FileInfo(f))
                                .OrderByDescending(f => f.LastWriteTime)
                                .ToList();
         }
-        return fileList;
+        catch (Exception ex)
+        {
+            context.API.LogException(nameof(Main), "Failed to get recent lnk files.", ex);
+            return new List<FileInfo>();
+        }
     }
 
     public void Dispose()
