@@ -3,10 +3,15 @@
                     xmlns:system="clr-namespace:System;assembly=mscorlib">
 
     <system:String x:Key="flow_plugin_recentlyused_plugin_name">Recently Used</system:String>
-    <system:String x:Key="flow_plugin_recentlyused_plugin_description">Search for recently used files and folders.</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_plugin_description">Search recently used files and folders</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_settings_show_folders">Show folders in results</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_settings_show_accessed_date">Show accessed date in subtitle</system:String>
     <system:String x:Key="flow_plugin_recentlyused_just_now">Just now</system:String>
     <system:String x:Key="flow_plugin_recentlyused_hour_ago">hour ago</system:String>
     <system:String x:Key="flow_plugin_recentlyused_hours_ago">hours ago</system:String>
     <system:String x:Key="flow_plugin_recentlyused_yesterday">Yesterday</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_copy_name">Copy name</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_copy_path">Copy path</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_open_containing_folder">Open containing folder</system:String>
 
 </ResourceDictionary>

@@ -4,10 +4,15 @@
     xmlns:system="clr-namespace:System;assembly=mscorlib">
 
     <system:String x:Key="flow_plugin_recentlyused_plugin_name">최근 사용 항목</system:String>
-    <system:String x:Key="flow_plugin_recentlyused_plugin_description">최근에 사용한 파일 및 폴더를 검색합니다.</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_plugin_description">최근에 사용한 파일 및 폴더를 검색합니다</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_settings_show_folders">결과에 폴더 표시</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_settings_show_accessed_date">부제에 접근 날짜 표시</system:String>
     <system:String x:Key="flow_plugin_recentlyused_just_now">방금 전</system:String>
     <system:String x:Key="flow_plugin_recentlyused_hour_ago">시간 전</system:String>
     <system:String x:Key="flow_plugin_recentlyused_hours_ago">시간 전</system:String>
     <system:String x:Key="flow_plugin_recentlyused_yesterday">어제</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_copy_name">이름 복사</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_copy_path">경로 복사</system:String>
+    <system:String x:Key="flow_plugin_recentlyused_open_containing_folder">포함된 폴더 열기</system:String>
 
 </ResourceDictionary>

@@ -12,18 +12,19 @@ using System.Globalization;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.ComponentModel;
 
-// IPluginI18n 및 IDisposable 인터페이스를 구현합니다.
-public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
+// IPluginI18n, IDisposable, IContextMenu 인터페이스를 구현합니다.
+public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable, IContextMenu
 {
-    private PluginInitContext context;
-    private string recentFolder;
-    private Settings settings;
+    private PluginInitContext? context;
+    private string? recentFolder;
+    private Settings? settings;
 
     private List<RecentItem> _cachedRecentItems = new List<RecentItem>();
-    private string _cacheFilePath;
+    private string? _cacheFilePath;
     private bool _isCacheUpdating = false;
-    private FileSystemWatcher _watcher;
+    private FileSystemWatcher? _watcher;
     private readonly Timer _updateTimer;
 
     public Main()
@@ -37,7 +38,9 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
         this.context = context;
         recentFolder = Environment.GetFolderPath(Environment.SpecialFolder.Recent);
         settings = context.API.LoadSettingJsonStorage<Settings>();
-        _cacheFilePath = Path.Combine(context.CurrentPluginMetadata.PluginDirectory, "cache.json");
+        settings.PropertyChanged += OnSettingsChanged;
+        var machineName = Environment.MachineName;
+        _cacheFilePath = Path.Combine(context.CurrentPluginMetadata.PluginDirectory, $"cache_{machineName}.json");
 
         LoadCacheFromFile();
 
@@ -61,9 +64,17 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
         Task.Run(UpdateCache);
     }
 
+    private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(Settings.ShowFolders))
+        {
+            Task.Run(UpdateCache);
+        }
+    }
+
     public Control CreateSettingPanel()
     {
-        return new SettingsUserControl(settings);
+        return new SettingsUserControl(settings!);
     }
 
     public string GetTranslatedPluginTitle()
@@ -101,8 +112,8 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
         var results = new List<Result>();
         foreach (var item in filteredItems)
         {
-            string displaySubTitle = item.SubTitle;
-            if (settings.ShowAccessedDate)
+            string displaySubTitle = item.SubTitle ?? string.Empty;
+            if (settings!.ShowAccessedDate)
             {
                 string formattedDate = FormatDateTime(item.DateModified);
                 displaySubTitle = $"{formattedDate} | {item.SubTitle}";
@@ -115,11 +126,12 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
                 IcoPath = item.LnkPath,
                 AutoCompleteText = item.TargetPath,
                 AddSelectedCount = false,
+                ContextData = item,
                 Action = _ =>
                 {
                     try
                     {
-                        context.API.ShellRun($"\"{item.LnkPath}\"");
+                        context!.API.ShellRun($"\"{item.LnkPath}\"");
                     }
                     catch { }
                     return true;
@@ -127,6 +139,75 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
             });
         }
         return results;
+    }
+
+    public List<Result> LoadContextMenus(Result selectedResult)
+    {
+        if (selectedResult.ContextData is not RecentItem item)
+        {
+            return new List<Result>();
+        }
+
+        var contextMenus = new List<Result>();
+
+        if (!string.IsNullOrEmpty(item.TargetFileName))
+        {
+            contextMenus.Add(new Result
+            {
+                Title = T("flow_plugin_recentlyused_copy_name"),
+                IcoPath = "Images\\copy.png",
+                Action = _ =>
+                {
+                    try
+                    {
+                        context!.API.CopyToClipboard(item.TargetFileName);
+                        return true;
+                    }
+                    catch (Exception e)
+                    {
+                        context!.API.LogException(nameof(Main), "Failed to copy name to clipboard", e);
+                        context!.API.ShowMsgError("Copy failed", "Could not copy name to clipboard.");
+                        return false;
+                    }
+                }
+            });
+        }
+
+        contextMenus.Add(new Result
+        {
+            Title = T("flow_plugin_recentlyused_copy_path"),
+            IcoPath = "Images\\copy.png",
+            Action = _ =>
+            {
+                try
+                {
+                    context!.API.CopyToClipboard(item.TargetPath);
+                    return true;
+                }
+                catch (Exception e)
+                {
+                    context!.API.LogException(nameof(Main), "Failed to copy path to clipboard", e);
+                    context!.API.ShowMsgError("Copy failed", "Could not copy path to clipboard.");
+                    return false;
+                }
+            }
+        });
+
+        if (!item.IsUrl)
+        {
+            contextMenus.Add(new Result
+            {
+                Title = T("flow_plugin_recentlyused_open_containing_folder"),
+                IcoPath = "Images\\folder.png",
+                Action = _ =>
+                {
+                    context!.API.ShellRun($"explorer.exe /select,\"{item.TargetPath}\"");
+                    return true;
+                }
+            });
+        }
+
+        return contextMenus;
     }
 
     private void OnRecentFolderChanged(object sender, FileSystemEventArgs e)
@@ -145,7 +226,7 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
             var newCache = new List<RecentItem>();
             if (Directory.Exists(recentFolder))
             {
-                var files = GetRecentLnkFiles(recentFolder);
+                var files = GetRecentLnkFiles(recentFolder!);
                 foreach (var fileInfo in files)
                 {
                     var lnkPath = fileInfo.FullName;
@@ -159,12 +240,12 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
                     bool isFile = File.Exists(targetPath);
                     bool isUrl = Uri.IsWellFormedUriString(targetPath, UriKind.Absolute) || targetPath.StartsWith("onenote:", StringComparison.OrdinalIgnoreCase);
 
-                    if (!settings.ShowFolders && isFolder) continue;
+                    if (!settings!.ShowFolders && isFolder) continue;
                     if (!isFile && !isFolder && !isUrl) continue;
 
                     string targetFileName = Path.GetFileName(targetPath);
                     string title = Path.GetFileName(targetPath);
-                    string subTitle = Path.GetDirectoryName(targetPath);
+                    string? subTitle = Path.GetDirectoryName(targetPath);
                     bool isDriveRoot = false;
 
                     if (string.IsNullOrEmpty(title) && Directory.Exists(targetPath))
@@ -205,9 +286,10 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
                         TargetPath = targetPath,
                         TargetFileName = targetFileName,
                         Title = title,
-                        SubTitle = subTitle,
+                        SubTitle = subTitle ?? string.Empty,
                         IsFolder = isFolder,
                         IsDriveRoot = isDriveRoot,
+                        IsUrl = isUrl,
                         DateModified = fileInfo.LastWriteTime
                     });
                 }
@@ -217,7 +299,7 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
         }
         catch (Exception ex)
         {
-            context.API.LogException(nameof(Main), "Failed to update cache.", ex);
+            context!.API.LogException(nameof(Main), "Failed to update cache.", ex);
         }
         finally
         {
@@ -230,11 +312,11 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
         try
         {
             var json = JsonSerializer.Serialize(_cachedRecentItems);
-            File.WriteAllText(_cacheFilePath, json);
+            File.WriteAllText(_cacheFilePath!, json);
         }
         catch (Exception ex)
         {
-            context.API.LogException(nameof(Main), "Failed to save cache.", ex);
+            context!.API.LogException(nameof(Main), "Failed to save cache.", ex);
         }
     }
 
@@ -244,7 +326,7 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
         {
             if (File.Exists(_cacheFilePath))
             {
-                var json = File.ReadAllText(_cacheFilePath);
+                var json = File.ReadAllText(_cacheFilePath!);
                 var items = JsonSerializer.Deserialize<List<RecentItem>>(json);
                 if (items != null)
                 {
@@ -254,7 +336,7 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
         }
         catch (Exception ex)
         {
-            context.API.LogException(nameof(Main), "Failed to load cache.", ex);
+            context!.API.LogException(nameof(Main), "Failed to load cache.", ex);
             _cachedRecentItems = new List<RecentItem>();
         }
     }
@@ -276,7 +358,7 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
 
     private string T(string key)
     {
-        return context.API.GetTranslation(key);
+        return context!.API.GetTranslation(key);
     }
 
     private List<FileInfo> GetRecentLnkFiles(string recentFolder)
@@ -290,13 +372,17 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
         }
         catch (Exception ex)
         {
-            context.API.LogException(nameof(Main), "Failed to get recent lnk files.", ex);
+            context!.API.LogException(nameof(Main), "Failed to get recent lnk files.", ex);
             return new List<FileInfo>();
         }
     }
 
     public void Dispose()
     {
+        if (settings != null)
+        {
+            settings.PropertyChanged -= OnSettingsChanged;
+        }
         _watcher?.Dispose();
         _updateTimer?.Dispose();
     }
@@ -325,13 +411,14 @@ public class Main : IPlugin, ISettingProvider, IPluginI18n, IDisposable
 [Serializable]
 public class RecentItem
 {
-    public string LnkPath { get; set; }
-    public string FileName { get; set; }
-    public string TargetPath { get; set; }
-    public string TargetFileName { get; set; }
-    public string Title { get; set; }
-    public string SubTitle { get; set; }
+    public required string LnkPath { get; set; }
+    public required string FileName { get; set; }
+    public required string TargetPath { get; set; }
+    public required string TargetFileName { get; set; }
+    public required string Title { get; set; }
+    public required string SubTitle { get; set; }
     public bool IsFolder { get; set; }
     public bool IsDriveRoot { get; set; }
+    public bool IsUrl { get; set; }
     public DateTime DateModified { get; set; }
 }
